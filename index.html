@@ -1,0 +1,98 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Iceland Population Change Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="page" aria-labelledby="page-title">
+    <header class="hero">
+      <p class="eyebrow">F21DV Data Visualisation Coursework</p>
+      <h1 id="page-title">Iceland Population Change (2016-2025)</h1>
+      <p class="intro">
+        This dashboard links population growth, citizenship composition, labour participation, and education structure
+        to tell a single story about demographic change in Iceland from 2016 to 2025.
+      </p>
+    </header>
+
+    <section class="controls card" aria-label="Global filters">
+      <div class="control-row">
+        <label for="year-slider" class="control-label">Selected year</label>
+        <input id="year-slider" type="range" min="2016" max="2025" step="1" value="2016" aria-describedby="year-value">
+        <output id="year-value" for="year-slider">2016</output>
+        <div id="year-timeline-wrap" class="year-timeline-wrap" aria-label="Year timeline selector"></div>
+      </div>
+      <div class="control-row control-row-secondary">
+        <div class="filter-status-wrap">
+          <span class="control-label">Current filter</span>
+          <p id="filter-status" class="filter-status" aria-live="polite">Year: 2016 | Group: All backgrounds | Education: All levels</p>
+        </div>
+        <button id="clear-filters" class="clear-button" type="button" aria-label="Clear active group and education filters">
+          Clear filters
+        </button>
+      </div>
+    </section>
+
+    <section id="insights" class="insights" aria-live="polite"></section>
+
+    <section class="insight-summary card" aria-live="polite">
+      <h2>Story Summary</h2>
+      <p id="insight-summary-body">Select a year to see how the narrative changes across the linked charts.</p>
+    </section>
+
+    <section class="dashboard-grid" aria-label="Interactive data story dashboard">
+      <article class="chart-card">
+        <div class="card-head">
+          <h2>Total Population Trend</h2>
+          <p>
+            The line chart anchors the story. Annotation callouts identify the peak year, the sharpest annual rise,
+            and the start of the observed period.
+          </p>
+        </div>
+        <div id="line-chart" class="chart" role="img" aria-label="Line chart showing Iceland total population from 2016 to 2025"></div>
+      </article>
+
+      <article class="chart-card">
+        <div class="card-head">
+          <div class="card-title-row">
+            <h2>Citizenship Composition</h2>
+            <span id="citizenship-filter-badge" class="chart-filter-badge" aria-live="polite">Filter: All backgrounds</span>
+          </div>
+          <p>
+            Grouped bars make the size difference between Icelandic and foreign backgrounds explicit for each year.
+            Click a bar or legend item to focus a background group across the dashboard.
+          </p>
+        </div>
+        <div id="area-chart" class="chart" role="img" aria-label="Grouped bar chart of Icelandic and foreign background population totals by year"></div>
+      </article>
+
+      <article class="chart-card">
+        <div class="card-head">
+          <h2>Labour Participation by Background</h2>
+          <p>
+            Bars compare the selected year with the 2016 baseline so changes in labour participation are easy to judge over time.
+          </p>
+        </div>
+        <div id="bar-chart" class="chart" role="img" aria-label="Grouped bar chart comparing labour participation shares by background"></div>
+      </article>
+
+      <article class="chart-card">
+        <div class="card-head">
+          <h2>Education Structure by Background</h2>
+          <p>
+            The previous treemap has been replaced with a stacked bar chart to make the structural comparison clearer and more academically defensible.
+          </p>
+        </div>
+        <div id="education-chart" class="chart" role="img" aria-label="Stacked bar chart showing estimated tertiary and non-tertiary education structure by background"></div>
+      </article>
+    </section>
+  </main>
+
+  <div id="tooltip" class="tooltip" role="status" aria-hidden="true"></div>
+
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
