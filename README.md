@@ -78,3 +78,4 @@ The project uses only HTML, CSS, JavaScript, and D3.js v7.
 3. Open `http://localhost:8000` in a browser.
 
 Using `file://` directly may block CSV loading in some browsers, so a local server is recommended.
+contributed by <Joshwajailsj>
