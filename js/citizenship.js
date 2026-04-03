@@ -2,13 +2,16 @@ import {
   CHART_HEIGHT,
   CHART_WIDTH,
   COLORS,
+  formatAreaValue,
   LABELS,
   MARGIN,
   TRANSITION_MS,
+  getNearestRowForYear,
   getRowForYear,
   getSelectionOpacity,
   hideTooltip,
   registerUpdater,
+  setSelectedYear,
   setSelectedGroup,
   showTooltip,
   state,
@@ -26,28 +29,9 @@ export function createCitizenshipChart(data) {
     .attr("preserveAspectRatio", "xMidYMid meet");
 
   const groups = ["icelandic", "foreign"];
-  const stack = d3.stack().keys(groups);
-  const series = stack(data);
   const latestYear = d3.max(data, (d) => d.year);
   const x = d3.scaleLinear().domain(d3.extent(data, (d) => d.year)).range([MARGIN.left, CHART_WIDTH - MARGIN.right]);
-  const y = d3
-    .scaleLinear()
-    .domain([0, d3.max(data, (d) => d.icelandic + d.foreign)])
-    .nice()
-    .range([CHART_HEIGHT - MARGIN.bottom, MARGIN.top]);
-
-  const area = d3
-    .area()
-    .x((d) => x(d.data.year))
-    .y0((d) => y(d[0]))
-    .y1((d) => y(d[1]))
-    .curve(d3.curveMonotoneX);
-
-  const line = d3
-    .line()
-    .x((d) => x(d.data.year))
-    .y((d) => y(d[1]))
-    .curve(d3.curveMonotoneX);
+  const y = d3.scaleLinear().range([CHART_HEIGHT - MARGIN.bottom, MARGIN.top]);
 
   svg
     .append("g")
@@ -83,7 +67,7 @@ export function createCitizenshipChart(data) {
 
   svg
     .append("text")
-    .attr("class", "axis-label")
+    .attr("class", "axis-label area-y-axis-label")
     .attr("transform", "rotate(-90)")
     .attr("x", -(CHART_HEIGHT / 2))
     .attr("y", 18)
@@ -148,12 +132,30 @@ export function createCitizenshipChart(data) {
     })
     .attr("height", CHART_HEIGHT - MARGIN.top - MARGIN.bottom)
     .attr("fill", "transparent")
+    .attr("tabindex", 0)
+    .attr("role", "button")
+    .attr("aria-label", (d) => `Preview citizenship composition for ${d.year}`)
+    .on("click", (_, d) => setSelectedYear(d.year, { revealTimelineLabel: true, force: true }))
+    .on("keydown", (event, d) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        setSelectedYear(d.year, { revealTimelineLabel: true, force: true });
+      }
+    })
     .on("mousemove", (event, d) => {
+      setSelectedYear(d.year);
       hoveredYear = d.year;
       updateCitizenshipChart();
+      const total = d.icelandic + d.foreign;
+      const values = state.areaMode === "percent"
+        ? {
+            icelandic: total ? (d.icelandic / total) * 100 : 0,
+            foreign: total ? (d.foreign / total) * 100 : 0,
+          }
+        : d;
       showTooltip(
         event,
-        `<strong>${d.year}</strong><br>${LABELS.icelandic}: ${d3.format(",")(d.icelandic)}<br>${LABELS.foreign}: ${d3.format(",")(d.foreign)}`
+        `<strong>${d.year}</strong><br>${LABELS.icelandic}: ${formatAreaValue(values.icelandic, state.areaMode)}<br>${LABELS.foreign}: ${formatAreaValue(values.foreign, state.areaMode)}`
       );
     })
     .on("mouseleave", () => {
@@ -163,9 +165,38 @@ export function createCitizenshipChart(data) {
     });
 
   function updateCitizenshipChart() {
+    const displayData = data.map((row) => {
+      const total = row.icelandic + row.foreign;
+      if (state.areaMode === "percent") {
+        return {
+          ...row,
+          icelandic: total ? (row.icelandic / total) * 100 : 0,
+          foreign: total ? (row.foreign / total) * 100 : 0,
+        };
+      }
+      return row;
+    });
+    const stack = d3.stack().keys(groups);
+    const series = stack(displayData);
+    const maxValue = state.areaMode === "percent" ? 100 : d3.max(displayData, (d) => d.icelandic + d.foreign);
+    y.domain([0, maxValue]).nice();
+
+    const area = d3
+      .area()
+      .x((d) => x(d.data.year))
+      .y0((d) => y(d[0]))
+      .y1((d) => y(d[1]))
+      .curve(d3.curveMonotoneX);
+
+    const line = d3
+      .line()
+      .x((d) => x(d.data.year))
+      .y((d) => y(d[1]))
+      .curve(d3.curveMonotoneX);
+
     const activeGroup = state.selectedGroup ? LABELS[state.selectedGroup] : "All backgrounds";
-    const selectedRow = getRowForYear(data, state.selectedYear);
-    const hoverRow = hoveredYear !== null ? getRowForYear(data, hoveredYear) : null;
+    const selectedRow = getNearestRowForYear(displayData, state.selectedYear);
+    const hoverRow = hoveredYear !== null ? getNearestRowForYear(displayData, hoveredYear) : null;
     const endRows = groups.map((group) => {
       const layer = series.find((item) => item.key === group);
       const latestPoint = layer.find((d) => d.data.year === latestYear);
@@ -197,6 +228,28 @@ export function createCitizenshipChart(data) {
         y: y(point[1]),
       };
     });
+
+    svg
+      .select(".grid")
+      .transition()
+      .duration(TRANSITION_MS)
+      .call(
+        d3
+          .axisLeft(y)
+          .ticks(6)
+          .tickSize(-(CHART_WIDTH - MARGIN.left - MARGIN.right))
+          .tickFormat("")
+      );
+
+    svg
+      .select(".y-axis")
+      .transition()
+      .duration(TRANSITION_MS)
+      .call(
+        d3.axisLeft(y).ticks(6).tickFormat(state.areaMode === "percent" ? (d) => `${d}%` : d3.format(","))
+      );
+
+    svg.select(".area-y-axis-label").text(state.areaMode === "percent" ? "Population share" : "Population");
 
     svg
       .select(".area-series")
@@ -342,7 +395,7 @@ export function createCitizenshipChart(data) {
 
     d3.select("#citizenship-filter-badge")
       .classed("is-active", Boolean(state.selectedGroup))
-      .text(`Year: ${selectedRow.year} | Filter: ${activeGroup}`);
+      .text(`${state.areaMode === "percent" ? "Percentage" : "Counts"} | Year: ${selectedRow.year} | Filter: ${activeGroup}`);
   }
 
   registerUpdater(updateCitizenshipChart);

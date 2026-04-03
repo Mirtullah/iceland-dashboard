@@ -29,13 +29,30 @@
           <span class="control-label">Current filter</span>
           <p id="filter-status" class="filter-status" aria-live="polite">Year: 2016 | Group: All backgrounds | Education: All levels</p>
         </div>
-        <button id="clear-filters" class="clear-button" type="button" aria-label="Clear active group and education filters">
-          Clear filters
-        </button>
+        <div class="control-actions">
+          <button id="story-toggle" class="clear-button" type="button" aria-pressed="false" aria-label="Play yearly story sequence">
+            Play story
+          </button>
+          <button id="clear-filters" class="clear-button" type="button" aria-label="Clear active group and education filters">
+            Clear filters
+          </button>
+        </div>
       </div>
     </section>
 
     <section id="insights" class="insights" aria-live="polite"></section>
+
+    <section id="metric-strip" class="metric-strip" aria-label="Derived dashboard metrics"></section>
+
+    <section class="story-panel card" aria-live="polite">
+      <div class="story-panel-head">
+        <h2>Milestone Reading</h2>
+        <span id="story-badge" class="story-badge">Story mode idle</span>
+      </div>
+      <p id="story-panel-body">
+        Select a year or play the story mode to step through the main shifts in the series.
+      </p>
+    </section>
 
     <section class="insight-summary card" aria-live="polite">
       <h2>Story Summary</h2>
@@ -58,14 +75,19 @@
         <div class="card-head">
           <div class="card-title-row">
             <h2>Citizenship Composition</h2>
-            <span id="citizenship-filter-badge" class="chart-filter-badge" aria-live="polite">Filter: All backgrounds</span>
+            <div class="chart-card-actions">
+              <button id="area-mode-toggle" class="chart-toggle-button" type="button" aria-pressed="false" aria-label="Switch citizenship chart between absolute counts and percentages">
+                Show percentage
+              </button>
+              <span id="citizenship-filter-badge" class="chart-filter-badge" aria-live="polite">Counts | Filter: All backgrounds</span>
+            </div>
           </div>
           <p>
-            Grouped bars make the size difference between Icelandic and foreign backgrounds explicit for each year.
-            Click a bar or legend item to focus a background group across the dashboard.
+            A stacked area chart shows how total population growth is split between Icelandic and foreign backgrounds.
+            Use the toggle to switch between counts and percentages, then click an area band or legend item to focus a background group.
           </p>
         </div>
-        <div id="area-chart" class="chart" role="img" aria-label="Grouped bar chart of Icelandic and foreign background population totals by year"></div>
+        <div id="area-chart" class="chart" role="img" aria-label="Stacked area chart of Icelandic and foreign background population totals by year"></div>
       </article>
 
       <article class="chart-card">
@@ -86,6 +108,43 @@
           </p>
         </div>
         <div id="education-chart" class="chart" role="img" aria-label="Stacked bar chart showing estimated tertiary and non-tertiary education structure by background"></div>
+      </article>
+
+      <article class="chart-card chart-card-feature">
+        <div class="card-head">
+          <h2>Demographic Pulse</h2>
+          <p>
+            This custom radial summary combines growth, citizenship mix, labour gap, and tertiary rate into a single
+            fingerprint for the selected year.
+          </p>
+        </div>
+        <div id="pulse-chart" class="chart" role="img" aria-label="Custom radial chart summarising the demographic pulse of the selected year"></div>
+      </article>
+    </section>
+
+    <section class="methods-grid" aria-label="Methodology and data notes">
+      <article class="method-card card">
+        <h2>Method and Processing</h2>
+        <ul>
+          <li>All CSV fields are parsed to numbers and sorted by year before rendering.</li>
+          <li>Linked interactions are driven by a shared application state for year, background group, and education level.</li>
+          <li>Derived indicators combine datasets to explain change, not just display raw values.</li>
+          <li>Education is linked by year using the national tertiary-rate series available in the dataset.</li>
+        </ul>
+      </article>
+
+      <article class="method-card card">
+        <h2>Data Notes</h2>
+        <p id="data-quality-note">
+          The dashboard checks year coverage across datasets and states where fallback values are used.
+        </p>
+        <p class="source-note">
+          Source files: <code>population_year.csv</code>, <code>citizenship_year.csv</code>, <code>labour_share_year.csv</code>,
+          and <code>education_year.csv</code>.
+        </p>
+        <p class="source-note">
+          The dashboard uses the provided CSV files as its data source.
+        </p>
       </article>
     </section>
   </main>

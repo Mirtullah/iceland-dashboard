@@ -2,6 +2,7 @@ import { createPopulationChart } from "./population.js";
 import { createCitizenshipChart } from "./citizenship.js";
 import { createLabourChart } from "./labour.js";
 import { createEducationChart } from "./education.js";
+import { createPulseChart } from "./pulse.js";
 
 const d3 = window.d3;
 
@@ -32,7 +33,10 @@ export const state = {
   selectedYear: 2016,
   selectedGroup: null,
   selectedEducationLevel: null,
+  areaMode: "absolute",
   timelineLabelVisible: false,
+  storyPlaying: false,
+  storyTimer: null,
   data: {
     population: [],
     citizenship: [],
@@ -65,7 +69,11 @@ export function pickField(row, aliases, fallback = undefined) {
 }
 
 export function getRowForYear(rows, year) {
-  const exact = rows.find((d) => d.year === year);
+  return rows.find((d) => d.year === year) || null;
+}
+
+export function getNearestRowForYear(rows, year) {
+  const exact = getRowForYear(rows, year);
   if (exact) {
     return exact;
   }
@@ -79,6 +87,18 @@ export function getRowForYear(rows, year) {
     const bestDelta = Math.abs(closest.year - year);
     return currentDelta < bestDelta ? row : closest;
   }, rows[0]);
+}
+
+export function formatSignedNumber(value) {
+  return `${value >= 0 ? "+" : ""}${d3.format(",")(value)}`;
+}
+
+export function formatSignedPercent(value) {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(1)} percentage points`;
+}
+
+export function formatAreaValue(value, mode) {
+  return mode === "percent" ? `${value.toFixed(1)}%` : d3.format(",")(value);
 }
 
 export function showTooltip(event, html) {
@@ -100,8 +120,18 @@ export function clearFilters() {
   updateAllCharts();
 }
 
+function stopStoryMode() {
+  if (state.storyTimer) {
+    clearInterval(state.storyTimer);
+    state.storyTimer = null;
+  }
+  state.storyPlaying = false;
+  d3.select("#story-toggle").text("Play story").attr("aria-pressed", "false");
+  d3.select("#story-badge").classed("is-playing", false).text("Story mode idle");
+}
+
 export function setSelectedYear(year, options = {}) {
-  const { force = false, revealTimelineLabel = false } = options;
+  const { force = false, revealTimelineLabel = false, preserveStory = false } = options;
   const boundedYear = Math.max(d3.min(state.years), Math.min(d3.max(state.years), year));
 
   if (revealTimelineLabel) {
@@ -110,6 +140,10 @@ export function setSelectedYear(year, options = {}) {
 
   if (!force && state.selectedYear === boundedYear) {
     return;
+  }
+
+  if (!preserveStory && state.storyPlaying) {
+    stopStoryMode();
   }
 
   state.selectedYear = boundedYear;
@@ -150,6 +184,204 @@ export function getSelectionOpacity(group = null, level = null, dimmed = 0.18) {
   const groupMatch = group === null || isGroupMatch(group);
   const levelMatch = level === null || isEducationMatch(level);
   return groupMatch && levelMatch ? 1 : dimmed;
+}
+
+function toggleAreaMode() {
+  state.areaMode = state.areaMode === "absolute" ? "percent" : "absolute";
+  const isPercent = state.areaMode === "percent";
+  d3.select("#area-mode-toggle")
+    .classed("is-active", isPercent)
+    .attr("aria-pressed", isPercent ? "true" : "false")
+    .text(isPercent ? "Show counts" : "Show percentage");
+  updateAllCharts();
+}
+
+function buildCoverageSummary() {
+  const datasets = [
+    { name: "Population", rows: state.data.population },
+    { name: "Citizenship", rows: state.data.citizenship },
+    { name: "Labour", rows: state.data.labour },
+    { name: "Education", rows: state.data.education },
+  ];
+
+  const maxYear = d3.max(state.years);
+  const notes = datasets.map((dataset) => {
+    const firstYear = d3.min(dataset.rows, (d) => d.year);
+    const lastYear = d3.max(dataset.rows, (d) => d.year);
+    return `${dataset.name}: ${firstYear}-${lastYear}`;
+  });
+
+  const educationLastYear = d3.max(state.data.education, (d) => d.year);
+  if (educationLastYear < maxYear) {
+    notes.push(`Education data ends in ${educationLastYear}, so ${educationLastYear + 1}-${maxYear} uses the same rate.`);
+  }
+
+  return notes.join(" | ");
+}
+
+function getDerivedStats(year) {
+  const baselineYear = d3.min(state.years);
+  const population = getRowForYear(state.data.population, year);
+  const baselinePopulation = getRowForYear(state.data.population, baselineYear);
+  const previousPopulation = getRowForYear(state.data.population, year - 1);
+  const citizenship = getRowForYear(state.data.citizenship, year);
+  const labour = getRowForYear(state.data.labour, year);
+  const education = getRowForYear(state.data.education, year) || getNearestRowForYear(state.data.education, year);
+
+  const populationChange = population.total_population - baselinePopulation.total_population;
+  const yearChange = previousPopulation ? population.total_population - previousPopulation.total_population : 0;
+  const totalCitizenship = citizenship.icelandic + citizenship.foreign;
+  const foreignShare = totalCitizenship ? (citizenship.foreign / totalCitizenship) * 100 : 0;
+  const labourGap = labour.icelandic_share - labour.foreign_share;
+  const tertiaryRate = education ? education.tertiary_share_25_64_total : 0;
+  const tertiaryEstimate = citizenship.foreign * (tertiaryRate / 100);
+  const educationReferenceYear = education ? education.year : year;
+
+  return {
+    baselineYear,
+    population,
+    populationChange,
+    yearChange,
+    citizenship,
+    foreignShare,
+    labour,
+    labourGap,
+    tertiaryRate,
+    tertiaryEstimate,
+    educationReferenceYear,
+  };
+}
+
+function getStoryMilestones() {
+  const populationData = state.data.population;
+  const citizenshipData = state.data.citizenship;
+  const labourData = state.data.labour;
+  const educationData = state.data.education;
+  const baselineYear = d3.min(state.years);
+
+  const highestPopulation = populationData.reduce((best, row) =>
+    row.total_population > best.total_population ? row : best
+  , populationData[0]);
+
+  const largestIncrease = populationData
+    .slice(1)
+    .map((row, index) => ({
+      year: row.year,
+      delta: row.total_population - populationData[index].total_population,
+    }))
+    .reduce((best, row) => (row.delta > best.delta ? row : best));
+
+  const highestForeignShare = citizenshipData
+    .map((row) => ({
+      year: row.year,
+      value: (row.foreign / (row.icelandic + row.foreign)) * 100,
+    }))
+    .reduce((best, row) => (row.value > best.value ? row : best));
+
+  const narrowestLabourGap = labourData
+    .map((row) => ({
+      year: row.year,
+      value: Math.abs(row.icelandic_share - row.foreign_share),
+    }))
+    .reduce((best, row) => (row.value < best.value ? row : best));
+
+  const highestTertiaryRate = educationData.reduce((best, row) =>
+    row.tertiary_share_25_64_total > best.tertiary_share_25_64_total ? row : best
+  , educationData[0]);
+
+  return { baselineYear, highestPopulation, largestIncrease, highestForeignShare, narrowestLabourGap, highestTertiaryRate };
+}
+
+function updateMetricStrip() {
+  const stats = getDerivedStats(state.selectedYear);
+  const cards = [
+    {
+      title: `Growth Since ${stats.baselineYear}`,
+      value: formatSignedNumber(stats.populationChange),
+      detail: `Total population reached ${d3.format(",")(stats.population.total_population)} in ${state.selectedYear}.`,
+    },
+    {
+      title: "Foreign-Background Share",
+      value: `${stats.foreignShare.toFixed(1)}%`,
+      detail: `${d3.format(",")(stats.citizenship.foreign)} of ${d3.format(",")(stats.citizenship.icelandic + stats.citizenship.foreign)} residents.`,
+    },
+    {
+      title: "Labour Participation Gap",
+      value: formatSignedPercent(stats.labourGap),
+      detail: `Icelandic: ${stats.labour.icelandic_share.toFixed(1)}% | Foreign: ${stats.labour.foreign_share.toFixed(1)}%`,
+    },
+    {
+      title: "Estimated Foreign Tertiary Count",
+      value: d3.format(",.0f")(stats.tertiaryEstimate),
+      detail:
+        stats.educationReferenceYear !== state.selectedYear
+          ? `Uses the latest available tertiary rate from ${stats.educationReferenceYear}.`
+          : `Based on the ${state.selectedYear} national tertiary share (${stats.tertiaryRate.toFixed(1)}%).`,
+    },
+  ];
+
+  d3.select("#metric-strip")
+    .selectAll("article")
+    .data(cards)
+    .join("article")
+    .attr("class", "metric-card")
+    .html((d) => `<h3>${d.title}</h3><span class="metric-value">${d.value}</span><p class="metric-detail">${d.detail}</p>`);
+}
+
+function updateStoryPanel() {
+  const year = state.selectedYear;
+  const stats = getDerivedStats(year);
+  const milestones = getStoryMilestones();
+  const notes = [];
+
+  if (year === milestones.baselineYear) {
+    notes.push("This is the baseline year used for all comparisons across the dashboard.");
+  }
+  if (year === milestones.largestIncrease.year) {
+    notes.push(`This year records the sharpest annual population increase in the series: ${formatSignedNumber(milestones.largestIncrease.delta)}.`);
+  }
+  if (year === milestones.highestPopulation.year) {
+    notes.push(`This is the population peak in the available data at ${d3.format(",")(stats.population.total_population)} residents.`);
+  }
+  if (year === milestones.highestForeignShare.year) {
+    notes.push(`Foreign-background share reaches its highest observed level here at ${stats.foreignShare.toFixed(1)}%.`);
+  }
+  if (year === milestones.narrowestLabourGap.year) {
+    notes.push(`The labour participation gap is narrowest here at ${Math.abs(stats.labourGap).toFixed(1)} percentage points.`);
+  }
+  if (year === milestones.highestTertiaryRate.year) {
+    notes.push(`The national tertiary education rate is highest here at ${stats.tertiaryRate.toFixed(1)}%.`);
+  }
+  if (stats.educationReferenceYear !== year) {
+    notes.push(`Education uses the latest available rate from ${stats.educationReferenceYear} for this year.`);
+  }
+  if (!notes.length) {
+    notes.push(
+      `Relative to ${stats.baselineYear}, the population is ${formatSignedNumber(stats.populationChange)} and foreign-background share is ${stats.foreignShare.toFixed(1)}%.`
+    );
+  }
+
+  d3.select("#story-panel-body").text(notes.join(" "));
+  d3.select("#story-badge")
+    .classed("is-playing", state.storyPlaying)
+    .text(state.storyPlaying ? `Story mode playing: ${year}` : `Focused year: ${year}`);
+}
+
+function toggleStoryMode() {
+  if (state.storyPlaying) {
+    stopStoryMode();
+    return;
+  }
+
+  state.storyPlaying = true;
+  d3.select("#story-toggle").text("Pause story").attr("aria-pressed", "true");
+  d3.select("#story-badge").classed("is-playing", true).text(`Story mode playing: ${state.selectedYear}`);
+
+  state.storyTimer = setInterval(() => {
+    const currentIndex = state.years.indexOf(state.selectedYear);
+    const nextIndex = currentIndex === state.years.length - 1 ? 0 : currentIndex + 1;
+    setSelectedYear(state.years[nextIndex], { revealTimelineLabel: true, force: true, preserveStory: true });
+  }, 1700);
 }
 
 function updateFilterStatus() {
@@ -252,7 +484,7 @@ function buildEducationRows() {
   return state.years
     .map((year) => {
       const citizenship = getRowForYear(state.data.citizenship, year);
-      const education = getRowForYear(state.data.education, year);
+      const education = getRowForYear(state.data.education, year) || getNearestRowForYear(state.data.education, year);
       const educationYear = education ? education.year : null;
       const tertiaryShare = education ? education.tertiary_share_25_64_total / 100 : 0;
 
@@ -276,28 +508,21 @@ function buildEducationRows() {
 
 function updateInsights() {
   const year = state.selectedYear;
-  const population = getRowForYear(state.data.population, year);
-  const previousPopulation = getRowForYear(state.data.population, year - 1);
-  const citizenship = getRowForYear(state.data.citizenship, year);
-  const labour = getRowForYear(state.data.labour, year);
-  const education = getRowForYear(state.data.education, year);
-
-  const totalChange = previousPopulation ? population.total_population - previousPopulation.total_population : 0;
-  const foreignShare = ((citizenship.foreign / (citizenship.icelandic + citizenship.foreign)) * 100).toFixed(1);
-  const tertiaryShare = education ? education.tertiary_share_25_64_total.toFixed(1) : "n/a";
+  const stats = getDerivedStats(year);
+  const tertiaryShare = Number.isFinite(stats.tertiaryRate) ? stats.tertiaryRate.toFixed(1) : "n/a";
 
   const cards = [
     {
       title: `${year} population snapshot`,
-      body: `${d3.format(",")(population.total_population)} residents, ${totalChange >= 0 ? "+" : ""}${d3.format(",")(totalChange)} from the previous year.`,
+      body: `${d3.format(",")(stats.population.total_population)} residents, ${formatSignedNumber(stats.yearChange)} from the previous year.`,
     },
     {
       title: "Citizenship mix",
-      body: `Foreign-background residents account for ${foreignShare}% of the total population in ${year}.`,
+      body: `Foreign-background residents account for ${stats.foreignShare.toFixed(1)}% of the total population in ${year}.`,
     },
     {
       title: "Labour and education context",
-      body: `Labour shares are ${labour.icelandic_share.toFixed(1)}% vs ${labour.foreign_share.toFixed(1)}%. The national tertiary share is ${tertiaryShare}% for ages 25-64.`,
+      body: `Labour shares are ${stats.labour.icelandic_share.toFixed(1)}% vs ${stats.labour.foreign_share.toFixed(1)}%. The national tertiary share is ${tertiaryShare}% for ages 25-64.`,
     },
   ];
 
@@ -311,28 +536,18 @@ function updateInsights() {
 
 function updateInsightSummary() {
   const year = state.selectedYear;
-  const baselineYear = d3.min(state.years);
-  const population = getRowForYear(state.data.population, year);
-  const baselinePopulation = getRowForYear(state.data.population, baselineYear);
-  const citizenship = getRowForYear(state.data.citizenship, year);
-  const labour = getRowForYear(state.data.labour, year);
-  const education = getRowForYear(state.data.education, year);
-  const educationReferenceYear = education ? education.year : year;
-
-  const populationChange = population.total_population - baselinePopulation.total_population;
-  const foreignShare = (citizenship.foreign / (citizenship.icelandic + citizenship.foreign)) * 100;
-  const labourGap = labour.icelandic_share - labour.foreign_share;
+  const stats = getDerivedStats(year);
   const filterSentence = state.selectedGroup
     ? `The current group filter highlights ${LABELS[state.selectedGroup]}${state.selectedEducationLevel ? ` with ${LABELS[state.selectedEducationLevel].toLowerCase()} structure` : ""}.`
     : "No persistent group filter is active, so the summary describes the full dashboard state.";
   const educationSentence =
-    educationReferenceYear !== year
-      ? `Education structure in ${year} uses the latest available rate from ${educationReferenceYear}.`
+    stats.educationReferenceYear !== year
+      ? `Education structure in ${year} uses the latest available rate from ${stats.educationReferenceYear}.`
       : `Education structure uses the ${year} national tertiary rate.`;
 
   const summary =
-    `By ${year}, Iceland's population is ${d3.format(",")(populationChange)} higher than in ${baselineYear}, reaching ${d3.format(",")(population.total_population)}. ` +
-    `Foreign-background residents represent ${foreignShare.toFixed(1)}% of the total population, while the labour participation gap between Icelandic and foreign backgrounds is ${Math.abs(labourGap).toFixed(1)} percentage points. ` +
+    `By ${year}, Iceland's population is ${d3.format(",")(stats.populationChange)} higher than in ${stats.baselineYear}, reaching ${d3.format(",")(stats.population.total_population)}. ` +
+    `Foreign-background residents represent ${stats.foreignShare.toFixed(1)}% of the total population, while the labour participation gap between Icelandic and foreign backgrounds is ${Math.abs(stats.labourGap).toFixed(1)} percentage points. ` +
     `${educationSentence} ${filterSentence}`;
 
   d3.select("#insight-summary-body").text(summary);
@@ -343,6 +558,8 @@ export function updateAllCharts() {
   updateFilterStatus();
   chartUpdaters.forEach((updateFn) => updateFn());
   updateInsights();
+  updateMetricStrip();
+  updateStoryPanel();
   updateInsightSummary();
 }
 
@@ -375,11 +592,14 @@ async function loadData() {
   state.years = state.data.population.map((d) => d.year);
   state.selectedYear = d3.min(state.years);
 
+  d3.select("#data-quality-note").text(buildCoverageSummary());
+
   renderTimelineSelector();
   createPopulationChart(state.data.population);
   createCitizenshipChart(state.data.citizenship);
   createLabourChart(state.data.labour);
   createEducationChart(buildEducationRows());
+  createPulseChart();
 
   d3.select("#year-slider")
     .attr("min", d3.min(state.years))
@@ -391,6 +611,8 @@ async function loadData() {
 
   d3.select("#year-value").text(state.selectedYear);
   d3.select("#clear-filters").on("click", clearFilters);
+  d3.select("#story-toggle").on("click", toggleStoryMode);
+  d3.select("#area-mode-toggle").on("click", toggleAreaMode);
 
   updateAllCharts();
 }
